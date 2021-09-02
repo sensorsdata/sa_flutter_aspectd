@@ -1,4 +1,5 @@
 .packages
+pubspec.lock
 .idea/*
 .dart_tool/*
 Snapshot/*
