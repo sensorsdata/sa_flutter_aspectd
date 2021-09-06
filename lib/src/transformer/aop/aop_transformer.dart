@@ -37,6 +37,7 @@ class AspectdAopTransformer extends FlutterProgramTransformer {
   final Map<String, Library> libraryMap = <String, Library>{};
   final Map<Uri, Source> concatUriToSource = <Uri, Source>{};
   final WidgetCreatorTracker tracker = WidgetCreatorTracker();
+
   @override
   void transform(Component component) {
     prepareAopItemInfo(component);
@@ -52,6 +53,10 @@ class AspectdAopTransformer extends FlutterProgramTransformer {
           AspectdAopInjectVisitor(injectInfoList, concatUriToSource));
     }
     tracker.transform(component, component.libraries);
+  }
+
+  void updateEntryPoint(String url){
+    tracker.updateEntryPoint(url);
   }
 
   void prepareAopItemInfo(Component program) {

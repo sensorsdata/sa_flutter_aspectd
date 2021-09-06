@@ -4,9 +4,11 @@
 
 library kernel.transformations.track_widget_constructor_locations;
 
+import 'dart:io';
+
 import 'package:kernel/ast.dart';
 import 'package:meta/meta.dart';
-
+import 'package:path/path.dart';
 // Parameter name used to track were widget constructor calls were made from.
 //
 // The parameter name contains a randomly generated hex string to avoid collision
@@ -325,6 +327,31 @@ class WidgetCreatorTracker {
   /// available.
   Class? _hasCreationLocationClass;
   String _rootUrl = '';
+  String _entryUrl = '';
+
+  void updateEntryPoint(String? url){
+    _entryUrl = url ?? '';
+  }
+
+  String _findPubspecFile(FileSystemEntity fileOrDir) {
+    if(fileOrDir is File) {
+      return _findPubspecFile(fileOrDir.parent);
+    }
+    if(fileOrDir is Directory) {
+      Directory dir = fileOrDir as Directory;
+      List<FileSystemEntity> fileList = dir.listSync();
+      bool isFound = fileList.any((element) {
+        if(element is File && basename(element.path) == 'pubspec.yaml') {
+          return true;
+        }
+       return false;
+      });
+      if(isFound) {
+        return dir.path;
+      }
+    }
+    return _findPubspecFile(fileOrDir.parent);
+  }
 
   void _resolveFlutterClasses(Iterable<Library> libraries) {
     // If the Widget or Debug location classes have been updated we need to get
@@ -341,20 +368,30 @@ class WidgetCreatorTracker {
           }
         } else {
           //start check
-          if (importUri.path.contains('main.dart')) {
-            //排除类似 package:testdemo/home/lib/main.dart 这样的路径的 main.dart
-            if (importUri.path.split('/').length == 2) {
-              if (library.fileUri != null &&
-                  library.fileUri.toString().endsWith('/lib/main.dart')) {
-                final String fileUriString = library.fileUri.toString();
-                if (fileUriString.isNotEmpty &&
-                    !fileUriString.contains('.pub-cache') &&
-                    fileUriString.endsWith('/lib/main.dart')) {
-                  _rootUrl = fileUriString.replaceAll('/lib/main.dart', '');
+          if(_entryUrl.isNotEmpty && _entryUrl != '' ) {
+            if(importUri.path == _entryUrl.replaceAll("package:", "")) {
+              File file = File.fromUri(library.fileUri!);
+              _rootUrl = _findPubspecFile(file);
+              _rootUrl = Uri.file(_rootUrl).toString();
+            }
+          } else {
+            if (importUri.path.contains('main.dart')) {
+              //排除类似 package:testdemo/home/lib/main.dart 这样的路径的 main.dart
+              if (importUri.path.split('/').length == 2) {
+                if (library.fileUri != null &&
+                    library.fileUri.toString().endsWith('/lib/main.dart')) {
+                  final String fileUriString = library.fileUri.toString();
+                  if (fileUriString.isNotEmpty &&
+                      !fileUriString.contains('.pub-cache') &&
+                      fileUriString.endsWith('/lib/main.dart')) {
+                    _rootUrl = fileUriString.replaceAll('/lib/main.dart', '');
+                  }
                 }
               }
             }
-          } else if (importUri.path.contains('sa_autotrack.dart')) {
+          }
+
+          if (importUri.path.contains('sa_autotrack.dart')) {
             for (Class class_ in library.classes) {
               if (class_.name == '_SAHasCreationLocation') {
                 _hasCreationLocationClass = class_;
