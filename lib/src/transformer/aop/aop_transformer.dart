@@ -58,7 +58,7 @@ class AspectdAopTransformer extends FlutterProgramTransformer {
   void updateEntryPoint(String url){
     tracker.updateEntryPoint(url);
   }
-
+  //查找需要执行 AOP 的类
   void prepareAopItemInfo(Component program) {
     final List<Library> libraries = program.libraries;
 
@@ -96,8 +96,16 @@ class AspectdAopTransformer extends FlutterProgramTransformer {
             importUri.toString() == AopUtils.kImportUriPointCut) {
           for (Procedure procedure in cls.procedures) {
             if (procedure.name!.name == AopUtils.kAopPointcutProcessName) {
-              pointCutProceedProcedure = procedure;
+              pointCutProceedProcedure = procedure;//获取到 PointCut 的 proceed 方法对应的 Procedure 对象
             }
+          }
+          //获取到 PointCut.target 字段
+          if(pointCutProceedProcedure != null){
+            cls.fieldsInternal.forEach((field) {
+              if(field.name!.text == 'target'){
+                AopUtils.pointCuntTargetField = field;
+              }
+            });
           }
         }
         if (clsName == 'List' && importUri.toString() == 'dart:core') {
@@ -153,7 +161,7 @@ class AspectdAopTransformer extends FlutterProgramTransformer {
       //   ..aopTransform();
     }
   }
-
+  //查找 AOP 实现类，例如 SensorsAnayliticsAOP 这个类，然后查找这个类中的所有方法
   void _resolveAopProcedures(Iterable<Library> libraries) {
     for (Library library in libraries) {
       final List<Class> classes = library.classes;
@@ -163,11 +171,11 @@ class AspectdAopTransformer extends FlutterProgramTransformer {
         if (!aspectdEnabled) {
           continue;
         }
-        for (Member member in cls.members) {
+        for (Member member in cls.members) {//这里的 members 是指类的所有方法、字段等，例如 SensorsAnayliticsAOP 类中定义的 _incrementCounterTest 方法
           if (!(member is Member)) {
             continue;
           }
-          final AopItemInfo? aopItemInfo = _processAopMember(member);
+          final AopItemInfo? aopItemInfo = _processAopMember(member);//此处需要注意 aopMember 字段，例如 _incrementCounterTest 方法对应的 Prodedure 对象
           if (aopItemInfo != null) {
             aopItemInfoList.add(aopItemInfo);
           }

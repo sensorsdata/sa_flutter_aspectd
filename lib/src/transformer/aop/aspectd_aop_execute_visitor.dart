@@ -1,18 +1,8 @@
-import 'package:args/args.dart';
-import 'package:frontend_server/frontend_server.dart' as frontend
-    show
-        FrontendCompiler,
-        CompilerInterface,
-        listenAndCompile,
-        argParser,
-        usage,
-        ProgramTransformer;
 import 'package:kernel/ast.dart';
-import 'package:path/path.dart' as path;
-import 'package:vm/incremental_compiler.dart';
 
 import 'aop_iteminfo.dart';
 import 'aop_utils.dart';
+import 'package:kernel/type_algebra.dart';
 
 class AspectdAopExecuteVisitor extends RecursiveVisitor<void> {
   AspectdAopExecuteVisitor(this._aopItemInfoList);
@@ -23,17 +13,17 @@ class AspectdAopExecuteVisitor extends RecursiveVisitor<void> {
     String importUri = library.importUri.toString();
     bool matches = false;
     int aopItemInfoListLen = _aopItemInfoList.length;
-    for (int i = 0; i < aopItemInfoListLen && !matches; i++) {
+    for (int i = 0; i < aopItemInfoListLen && !matches; i++) {//查询当前的 Library 中的 dart 文件是否有符合 AOP 中定义的 Hook 点
       AopItemInfo aopItemInfo = _aopItemInfoList[i];
       if ((aopItemInfo.isRegex! &&
               RegExp(aopItemInfo.importUri!).hasMatch(importUri)) ||
-          (!aopItemInfo.isRegex! && importUri == aopItemInfo.importUri)) {
+          (!aopItemInfo.isRegex! && importUri == aopItemInfo.importUri)) {//此处的 importUri 例子：package:testdemo/main_old.dart
         matches = true;
         break;
       }
     }
-    if (matches) {
-      library.visitChildren(this);
+    if (matches) {//如果查找到
+      library.visitChildren(this);//开始访问此 Library 中的元素
     }
   }
 
@@ -46,13 +36,13 @@ class AspectdAopExecuteVisitor extends RecursiveVisitor<void> {
       AopItemInfo aopItemInfo = _aopItemInfoList[i];
       if ((aopItemInfo.isRegex! &&
               RegExp(aopItemInfo.clsName!).hasMatch(clsName)) ||
-          (!aopItemInfo.isRegex! && clsName == aopItemInfo.clsName)) {
+          (!aopItemInfo.isRegex! && clsName == aopItemInfo.clsName)) {//判断当前的类是否在 AOPItem 中找到
         matches = true;
         break;
       }
     }
     if (matches) {
-      cls.visitChildren(this);
+      cls.visitChildren(this);//如果找到对应类，就继续查找其中的方法
     }
   }
 
@@ -65,7 +55,7 @@ class AspectdAopExecuteVisitor extends RecursiveVisitor<void> {
       AopItemInfo aopItemInfo = _aopItemInfoList[i];
       if ((aopItemInfo.isRegex! &&
               RegExp(aopItemInfo.methodName!).hasMatch(procedureName)) ||
-          (!aopItemInfo.isRegex! && procedureName == aopItemInfo.methodName)) {
+          (!aopItemInfo.isRegex! && procedureName == aopItemInfo.methodName)) {//查看类中的所有方法，将其与 AOPItem 进行对比，确认是否是需要处理的方法
         matchedAopItemInfo = aopItemInfo;
         break;
       }
@@ -150,13 +140,17 @@ class AspectdAopExecuteVisitor extends RecursiveVisitor<void> {
     pointcutClass.procedures.add(stubProcedureNew);
     AopUtils.insertProceedBranch(stubProcedureNew, shouldReturn);
   }
-
+  //例如现在开始处理 _MyHomePageState 的 _incrementCounter 方法，步骤是：
+  //1.创建原方法的代理方法，并将原方法中的方法体内容转移到代理方法中
+  //2.在原方法中调用 AOP 类中的方法，并构建 PointCut，new SensorsAnalyticsAOP()._incrementCounterTest(PointCut)
+  //3.在 PointCut 类中创建 aop_stub_0 方法，此方法体为：(this.target as _MyHomePageState)._incrementCounter_aop_stub_0()
+  //4.修改 PointCut proceed 方法，在其中添加 if 判断
   void transformInstanceMethodProcedure(Library? originalLibrary,
       AopItemInfo aopItemInfo, Procedure originalProcedure) {
-    if (AopUtils.manipulatedProcedureSet.contains(originalProcedure)) {
+    if (AopUtils.manipulatedProcedureSet.contains(originalProcedure)) {//如果已经处理完过，就直接返回
       return;
     }
-    final FunctionNode functionNode = originalProcedure.function!;
+    final FunctionNode functionNode = originalProcedure.function!;//FunctionNode 中定义了方法的参数和、body、返回值类型等
     final Class? originalClass = originalProcedure.parent as Class?;
     final Statement? body = functionNode.body;
     if (body == null) {
@@ -166,11 +160,11 @@ class AspectdAopExecuteVisitor extends RecursiveVisitor<void> {
         !(originalProcedure.function!.returnType is VoidType);
 
     final String stubKey =
-        '${AopUtils.kAopStubMethodPrefix}${AopUtils.kPrimaryKeyAopMethod}';
+        '${AopUtils.kAopStubMethodPrefix}${AopUtils.kPrimaryKeyAopMethod}';//例如：aop_stub_0
     AopUtils.kPrimaryKeyAopMethod++;
 
-    //目标新建stub函数，方便完成目标->aopstub->目标stub链路
-    final Procedure originalStubProcedure = AopUtils.createStubProcedure(
+    //原始方法中的方法体内容转移到 proxy 方法中
+    final Procedure originalStubProcedure = AopUtils.createStubProcedure(// 创建元方法对应的代理方法，例如 _incrementCounter_aop_stub_0
         Name(originalProcedure.name!.name + '_' + stubKey,
             originalProcedure.name!.library),
         aopItemInfo,
@@ -178,7 +172,7 @@ class AspectdAopExecuteVisitor extends RecursiveVisitor<void> {
         body,
         shouldReturn);
     originalClass!.procedures.add(originalStubProcedure);
-    functionNode.body = createPointcutCallFromOriginal(
+    functionNode.body = createPointcutCallFromOriginal(//将原方法_incrementCounter中的内容，使用 new SensorsAnalyticsAOP()._incrementCounterTest(PointCut) 这样的方法体替换掉
         originalLibrary!,
         aopItemInfo,
         stubKey,
@@ -191,25 +185,46 @@ class AspectdAopExecuteVisitor extends RecursiveVisitor<void> {
     final Library pointcutLibrary =
         AopUtils.pointCutProceedProcedure!.parent!.parent as Library;
     final Class pointcutClass = AopUtils.pointCutProceedProcedure!.parent as Class;
-    AopUtils.insertLibraryDependency(pointcutLibrary, originalLibrary);
+    AopUtils.insertLibraryDependency(pointcutLibrary, originalLibrary);//pointcut.dart 中依赖 main_old.dart，
 
-    final MethodInvocation mockedInvocation = MethodInvocation(
-        AsExpression(PropertyGet(ThisExpression(), Name('target')),
-            InterfaceType(originalClass, Nullability.legacy)),
+
+    //------start  移除 MethodInvocation 这个 API
+    InstanceGet instanceGet = InstanceGet.byReference(InstanceAccessKind.Instance,
+        ThisExpression(),
+        Name("target"),
+        interfaceTargetReference: AopUtils.pointCuntTargetField!.getterReference,
+        resultType: AopUtils.pointCuntTargetField!.getterType);
+    AsExpression asExpression = AsExpression(instanceGet, InterfaceType(originalClass, Nullability.legacy));
+
+    InstanceInvocation mockedInstanceInvocation = InstanceInvocation(
+        InstanceAccessKind.Instance,
+        asExpression,
         originalStubProcedure.name!,
-        AopUtils.concatArguments4PointcutStubCall(originalProcedure));
+        AopUtils.concatArguments4PointcutStubCall(originalProcedure),
+        interfaceTarget: originalStubProcedure,
+        functionType: originalStubProcedure.function!.computeFunctionType(Nullability.legacy));
 
+    //------end
+
+    // final MethodInvocation mockedInvocation = MethodInvocation(//mockedInvocation 相当于 (this.target as _MyHomePageState)._incrementCounter_aop_stub_0()
+    //     AsExpression(PropertyGet(ThisExpression(), Name('target')),
+    //         InterfaceType(originalClass, Nullability.legacy)),
+    //     originalStubProcedure.name!,
+    //     AopUtils.concatArguments4PointcutStubCall(originalProcedure));
+
+
+    //在 PointCut 中创建 aop_stub_0 方法，此方法体为 (this.target as _MyHomePageState)._incrementCounter_aop_stub_0()
     final Procedure stubProcedureNew = AopUtils.createStubProcedure(
-        Name(stubKey, AopUtils.pointCutProceedProcedure!.name!.library),
+        Name(stubKey, AopUtils.pointCutProceedProcedure!.name!.library),//创建 aop_stub_0
         aopItemInfo,
         AopUtils.pointCutProceedProcedure!,
         AopUtils.createProcedureBodyWithExpression(
-            mockedInvocation, shouldReturn),
+            mockedInstanceInvocation, shouldReturn),
         shouldReturn);
     pointcutClass.procedures.add(stubProcedureNew);
     AopUtils.insertProceedBranch(stubProcedureNew, shouldReturn);
   }
-
+  //创建 new SensorsAnalyticsAOP()._incrementCounterTest(PointCut) 这样的方法体
   Block createPointcutCallFromOriginal(
       Library library,
       AopItemInfo aopItemInfo,
@@ -218,7 +233,7 @@ class AspectdAopExecuteVisitor extends RecursiveVisitor<void> {
       Member member,
       Arguments arguments,
       bool shouldReturn) {
-    AopUtils.insertLibraryDependency(
+    AopUtils.insertLibraryDependency(//当前的 Library 中添加依赖，例如 testdemo/main_old.dart 中添加，sa_aspectd_impl/sensorsdata_aop_impl.dart
         library, aopItemInfo.aopMember!.parent!.parent as Library?);
     final Arguments redirectArguments = Arguments.empty();
     AopUtils.concatArgumentsForAopMethod(
@@ -230,13 +245,13 @@ class AspectdAopExecuteVisitor extends RecursiveVisitor<void> {
         callExpression =
             StaticInvocation(aopItemInfo.aopMember as Procedure, redirectArguments);
       } else {
-        final Class aopItemMemberCls = aopItemInfo.aopMember!.parent as Class;
+        final Class aopItemMemberCls = aopItemInfo.aopMember!.parent as Class;//获取到 SensorsAnalyticsAOP 这个 Class
         final ConstructorInvocation redirectConstructorInvocation =
             ConstructorInvocation.byReference(
-                aopItemMemberCls.constructors.first.reference,
-                Arguments(<Expression>[]));
-        callExpression = MethodInvocation(redirectConstructorInvocation,
-            aopItemInfo.aopMember!.name!, redirectArguments);
+                aopItemMemberCls.constructors.first.reference,//SensorsAnalyticsAOP. 构造方法对应的 reference
+                Arguments(<Expression>[]));//无参构造方法
+        callExpression = MethodInvocation(redirectConstructorInvocation,//相当于 new SensorsAnalyticsAOP()._incrementCounterTest(PointCut)
+            aopItemInfo.aopMember!.name!, redirectArguments);//此处的 redirectArguments 示例：Arguments((new PointCut(<dynamic, dynamic>{}, this, "_incrementCounter", "aop_stub_0", <dynamic>[], <dynamic, dynamic>{})))
       }
     }
     return AopUtils.createProcedureBodyWithExpression(

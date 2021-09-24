@@ -40,6 +40,7 @@ class AopUtils {
   static Procedure? mapGetProcedure;
   static Component? platformStrongComponent;
   static Set<Procedure> manipulatedProcedureSet = {};
+  static Field? pointCuntTargetField;
 
   static AopMode? getAopModeByNameAndImportUri(String? name, String? importUri) {
     if (name == kAopAnnotationClassCall && importUri == kImportUriAopCall) {
@@ -234,15 +235,15 @@ class AopUtils {
             pointCutConstructorArguments);
     redirectArguments.positional.add(pointCutConstructorInvocation);
   }
-
+  //构建调用原始方法的代理方法的参数
   static Arguments concatArguments4PointcutStubCall(Member member) {
     final Arguments arguments = Arguments.empty();
     int i = 0;
     for (VariableDeclaration variableDeclaration
-        in member.function!.positionalParameters) {
+        in member.function!.positionalParameters) {//此处是将 PointCut 中的 positionalParams 分别转换为不同的类型
       final Arguments getArguments = Arguments.empty();
       getArguments.positional.add(IntLiteral(i));
-      final MethodInvocation methodInvocation = MethodInvocation(
+      final MethodInvocation methodInvocation = MethodInvocation(//示例：相当于调用 PointCut 的  this.positionalParams[i] as int
           PropertyGet(ThisExpression(), Name('positionalParams')),
           listGetProcedure!.name!,
           getArguments);
@@ -262,14 +263,14 @@ class AopUtils {
           getArguments);
       final AsExpression asExpression = AsExpression(methodInvocation,
           deepCopyASTNode(variableDeclaration.type, ignoreGenerics: true));
-      namedEntries.add(NamedExpression(variableDeclaration.name!, asExpression));
+      namedEntries.add(NamedExpression(variableDeclaration.name!, asExpression));//相当于 PointCut   this.namedParams["name"] as String
     }
     if (namedEntries.isNotEmpty) {
       arguments.named.addAll(namedEntries);
     }
     return arguments;
   }
-
+  //修改 PointCut proceed 方法中的分支
   static void insertProceedBranch(Procedure procedure, bool shouldReturn) {
     final Block block = pointCutProceedProcedure!.function!.body as Block;
     final String methodName = procedure.name!.name;
@@ -381,21 +382,21 @@ class AopUtils {
     sourceInfo.putIfAbsent('lineOffset', () => '$lineOffSet');
     return sourceInfo;
   }
-
-  static Procedure createStubProcedure(Name methodName, AopItemInfo aopItemInfo,
-      Procedure referProcedure, Statement? bodyStatements, bool shouldReturn) {
-    final FunctionNode functionNode = FunctionNode(bodyStatements,
+  //创建 stub 方法，例如对于 _incrementCounter 方法，会创建一个 _incrementCounter_aop_stub_0 方法，此方法会将 _incrementCounter 中的方法体内容转移到这个代理方法中
+  static Procedure createStubProcedure(Name methodName, AopItemInfo aopItemInfo,//示例：此处的 aopMember 值s为 SensorsAnalyticsAOP._incrementCounterTest 对应的 Procedure
+      Procedure referProcedure, Statement? bodyStatements, bool shouldReturn) {//referProcdure 为 _MyHomePageState._incrementCounter。bodyStatements 为原方法的方法体内容
+    final FunctionNode functionNode = FunctionNode(bodyStatements,//构建代理方法
         typeParameters: deepCopyASTNodes<TypeParameter>(
             referProcedure.function!.typeParameters),
         positionalParameters: referProcedure.function!.positionalParameters,
         namedParameters: referProcedure.function!.namedParameters,
         requiredParameterCount: referProcedure.function!.requiredParameterCount,
-        returnType: shouldReturn
+        returnType: shouldReturn //根据原方法的情况构建返回值
             ? deepCopyASTNode(referProcedure.function!.returnType)
             : const VoidType(),
         asyncMarker: referProcedure.function!.asyncMarker,
         dartAsyncMarker: referProcedure.function!.dartAsyncMarker);
-    final Procedure procedure = Procedure(
+    final Procedure procedure = Procedure(//构建代理方法
       Name(methodName.name, methodName.library),
       ProcedureKind.Method,
       functionNode,
@@ -487,6 +488,29 @@ class AopUtils {
           deepCopyASTNodes(node.typeArguments, ignoreGeneric: ignoreGenerics));
     }
     return node;
+  }
+
+  static FunctionType computeFunctionTypeForFunctionNode(FunctionNode functionNode) {
+    List<VariableDeclaration> positionParams = functionNode.positionalParameters;
+    final List<DartType> positionDartType = [];
+    positionParams.forEach((element) {
+      positionDartType.add(element.type);
+    });
+
+    List<VariableDeclaration> namedParams = functionNode.namedParameters;
+    final List<NamedType> namedDartType = [];
+    namedParams.forEach((element) {
+      namedDartType.add(NamedType(element.name!, element.type));
+    });
+    FunctionType functionType = new FunctionType(
+        positionDartType,
+        functionNode.returnType,
+        Nullability.legacy,
+        namedParameters: namedDartType,
+        typeParameters: [],
+        requiredParameterCount: functionNode.requiredParameterCount
+    );
+    return functionType;
   }
 
   static List<T> deepCopyASTNodes<T>(List<T> nodes,
