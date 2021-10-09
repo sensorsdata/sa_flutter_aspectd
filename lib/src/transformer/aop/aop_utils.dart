@@ -490,21 +490,115 @@ class AopUtils {
     return node;
   }
 
-  static FunctionType computeFunctionTypeForFunctionNode(FunctionNode functionNode) {
-    List<VariableDeclaration> positionParams = functionNode.positionalParameters;
+  static dynamic deepCopyASTNode2(dynamic node,
+      {bool isReturnType = false, bool ignoreGenerics = false}) {
+    if (node is TypeParameter) {
+      if (ignoreGenerics)
+        return TypeParameter(node.name, node.bound, pointCuntTargetField!.type);
+    }
+    if (node is VariableDeclaration) {
+      return VariableDeclaration(
+        node.name,
+        initializer: node.initializer,
+        type: deepCopyASTNode2(node.type),
+        flags: node.flags,
+        isFinal: node.isFinal,
+        isConst: node.isConst,
+        isFieldFormal: node.isFieldFormal,
+        isCovariant: node.isCovariant,
+      );
+    }
+    if (node is TypeParameterType) {
+      if (isReturnType || ignoreGenerics) {
+        return pointCuntTargetField!.type;
+      }
+      return TypeParameterType(
+          deepCopyASTNode2(node.parameter), node.nullability,deepCopyASTNode2(node.promotedBound));
+    }
+    if (node is FunctionType) {
+      return FunctionType(
+          deepCopyASTNode2(node.positionalParameters),
+          deepCopyASTNode2(node.returnType, isReturnType: true),
+          Nullability.nonNullable,
+          namedParameters: deepCopyASTNode2(node.namedParameters),
+          typeParameters: deepCopyASTNode2(node.typeParameters),
+          requiredParameterCount: node.requiredParameterCount,
+          typedefType: deepCopyASTNode2(node.typedefType,
+              ignoreGenerics: ignoreGenerics));
+    }
+    if (node is TypedefType) {
+      return TypedefType(node.typedefNode, Nullability.nonNullable,
+          [pointCuntTargetField!.type]);
+    }
+    return node;
+  }
+
+  static List<T> deepCopyASTNodes2<T>(List<T> nodes,
+      {bool ignoreGeneric = false}) {
+    final List<T> newNodes = <T>[];
+    for (T node in nodes) {
+      final dynamic newNode =
+      deepCopyASTNode2(node, ignoreGenerics: ignoreGeneric);
+      if (newNode != null) {
+        newNodes.add(newNode);
+      }
+    }
+    return newNodes;
+  }
+
+  static Arguments concatArguments4PointcutStubCall2(Member member) {
+    final Arguments arguments = Arguments.empty();
+    int i = 0;
+    for (VariableDeclaration variableDeclaration
+    in member.function!.positionalParameters) {//此处是将 PointCut 中的 positionalParams 分别转换为不同的类型
+      final Arguments getArguments = Arguments.empty();
+      getArguments.positional.add(IntLiteral(i));
+      final MethodInvocation methodInvocation = MethodInvocation(//示例：相当于调用 PointCut 的  this.positionalParams[i] as int
+          PropertyGet(ThisExpression(), Name('positionalParams')),
+          listGetProcedure!.name!,
+          getArguments);
+      final AsExpression asExpression = AsExpression(methodInvocation,
+          deepCopyASTNode2(variableDeclaration.type, ignoreGenerics: true));
+      arguments.positional.add(asExpression);
+      i++;
+    }
+    final List<NamedExpression> namedEntries = <NamedExpression>[];
+    for (VariableDeclaration variableDeclaration
+    in member.function!.namedParameters) {
+      final Arguments getArguments = Arguments.empty();
+      getArguments.positional.add(StringLiteral(variableDeclaration.name!));
+      final MethodInvocation methodInvocation = MethodInvocation(
+          PropertyGet(ThisExpression(), Name('namedParams')),
+          mapGetProcedure!.name!,
+          getArguments);
+      final AsExpression asExpression = AsExpression(methodInvocation,
+          deepCopyASTNode2(variableDeclaration.type, ignoreGenerics: true));
+      namedEntries.add(NamedExpression(variableDeclaration.name!, asExpression));//相当于 PointCut   this.namedParams["name"] as String
+    }
+    if (namedEntries.isNotEmpty) {
+      arguments.named.addAll(namedEntries);
+    }
+    return arguments;
+  }
+
+  static FunctionType computeFunctionTypeForFunctionNode(FunctionNode functionNode, Arguments arguments) {
     final List<DartType> positionDartType = [];
-    positionParams.forEach((element) {
-      positionDartType.add(element.type);
+    arguments.positional.forEach((element) {
+      if(element is AsExpression){
+        positionDartType.add(element.type);
+      }
     });
 
-    List<VariableDeclaration> namedParams = functionNode.namedParameters;
     final List<NamedType> namedDartType = [];
-    namedParams.forEach((element) {
-      namedDartType.add(NamedType(element.name!, element.type));
+    arguments.named.forEach((element) {
+      Expression value =  element.value;
+      if(value is AsExpression){
+        namedDartType.add(NamedType(element.name, value.type));
+      }
     });
     FunctionType functionType = new FunctionType(
         positionDartType,
-        functionNode.returnType,
+        deepCopyASTNode(functionNode.returnType, isReturnType: true,ignoreGenerics: true),
         Nullability.legacy,
         namedParameters: namedDartType,
         typeParameters: [],

@@ -193,16 +193,17 @@ class AspectdAopExecuteVisitor extends RecursiveVisitor<void> {
         ThisExpression(),
         Name("target"),
         interfaceTargetReference: AopUtils.pointCuntTargetField!.getterReference,
-        resultType: AopUtils.pointCuntTargetField!.getterType);
-    AsExpression asExpression = AsExpression(instanceGet, InterfaceType(originalClass, Nullability.legacy));
+        resultType: InterfaceType(originalClass, Nullability.nonNullable));
+    AsExpression asExpression = AsExpression(instanceGet, InterfaceType(originalClass, Nullability.nonNullable));
 
+    Arguments arguments = AopUtils.concatArguments4PointcutStubCall(originalProcedure);
     InstanceInvocation mockedInstanceInvocation = InstanceInvocation(
         InstanceAccessKind.Instance,
         asExpression,
         originalStubProcedure.name!,
-        AopUtils.concatArguments4PointcutStubCall(originalProcedure),
+        arguments,
         interfaceTarget: originalStubProcedure,
-        functionType: originalStubProcedure.function!.computeFunctionType(Nullability.legacy));
+        functionType: AopUtils.computeFunctionTypeForFunctionNode(functionNode, arguments));
 
     //------end
 
@@ -211,8 +212,8 @@ class AspectdAopExecuteVisitor extends RecursiveVisitor<void> {
     //         InterfaceType(originalClass, Nullability.legacy)),
     //     originalStubProcedure.name!,
     //     AopUtils.concatArguments4PointcutStubCall(originalProcedure));
-
-
+    //
+    //
     //在 PointCut 中创建 aop_stub_0 方法，此方法体为 (this.target as _MyHomePageState)._incrementCounter_aop_stub_0()
     final Procedure stubProcedureNew = AopUtils.createStubProcedure(
         Name(stubKey, AopUtils.pointCutProceedProcedure!.name!.library),//创建 aop_stub_0
