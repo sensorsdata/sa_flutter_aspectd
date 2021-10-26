@@ -18,9 +18,9 @@ import 'package:vm/target/flutter.dart';
 import 'aop_iteminfo.dart';
 import 'aop_mode.dart';
 import 'aop_utils.dart';
-import 'aspectd_aop_call_visitor.dart';
+// import 'aspectd_aop_call_visitor.dart';
 import 'aspectd_aop_execute_visitor.dart';
-import 'aspectd_aop_inject_visitor.dart';
+// import 'aspectd_aop_inject_visitor.dart';
 import 'track_widget_custom_location.dart';
 
 /// Replaces [Object.toString] overrides with calls to super for the specified
@@ -41,17 +41,17 @@ class AspectdAopTransformer extends FlutterProgramTransformer {
   @override
   void transform(Component component) {
     prepareAopItemInfo(component);
-    if (callInfoList.isNotEmpty) {
-      component.transformChildren(
-          AspectdAopCallVisitor(callInfoList, concatUriToSource, libraryMap));
-    }
+    // if (callInfoList.isNotEmpty) {
+    //   component.transformChildren(
+    //       AspectdAopCallVisitor(callInfoList, concatUriToSource, libraryMap));
+    // }
     if (executeInfoList.isNotEmpty) {
       component.visitChildren(AspectdAopExecuteVisitor(executeInfoList));
     }
-    if (injectInfoList.isNotEmpty) {
-      component.visitChildren(
-          AspectdAopInjectVisitor(injectInfoList, concatUriToSource));
-    }
+    // if (injectInfoList.isNotEmpty) {
+    //   component.visitChildren(
+    //       AspectdAopInjectVisitor(injectInfoList, concatUriToSource));
+    // }
     tracker.transform(component, component.libraries);
   }
 
@@ -95,29 +95,49 @@ class AspectdAopTransformer extends FlutterProgramTransformer {
         if (clsName == AopUtils.kAopAnnotationClassPointCut &&
             importUri.toString() == AopUtils.kImportUriPointCut) {
           for (Procedure procedure in cls.procedures) {
-            if (procedure.name!.name == AopUtils.kAopPointcutProcessName) {
+            if (procedure.name.text == AopUtils.kAopPointcutProcessName) {
               pointCutProceedProcedure = procedure;//获取到 PointCut 的 proceed 方法对应的 Procedure 对象
             }
           }
           //获取到 PointCut.target 字段
           if(pointCutProceedProcedure != null){
-            cls.fieldsInternal.forEach((field) {
-              if(field.name!.text == 'target'){
+            cls.fields.forEach((field) {
+              if(field.name.text == 'target'){
                 AopUtils.pointCuntTargetField = field;
+              }
+              if(field.name.text == 'stubKey'){
+                AopUtils.pointCutStubKeyField = field;
+              }
+              if(field.name.text == 'positionalParams'){
+                AopUtils.pointCutPositionParamsListField = field;
+              }
+              if(field.name.text == 'namedParams'){
+                AopUtils.pointCutNamedParamsMapField = field;
               }
             });
           }
         }
         if (clsName == 'List' && importUri.toString() == 'dart:core') {
           for (Procedure procedure in cls.procedures) {
-            if (procedure.name!.name == '[]') {
+            if (procedure.name.text == '[]') {
               listGetProcedure = procedure;
             }
           }
         }
+        if (clsName == 'bool' && importUri.toString() == 'dart:core') {
+          AopUtils.boolClass = cls;
+        }
+        if (clsName == 'String' && importUri.toString() == 'dart:core') {
+          for (Procedure procedure in cls.procedures) {
+            if (procedure.name.text == '==') {
+              AopUtils.stringEqualsProcedure = procedure;
+            }
+          }
+        }
+
         if (clsName == 'Map' && importUri.toString() == 'dart:core') {
           for (Procedure procedure in cls.procedures) {
-            if (procedure.name!.name == '[]') {
+            if (procedure.name.text == '[]') {
               mapGetProcedure = procedure;
             }
           }
@@ -208,20 +228,20 @@ class AspectdAopTransformer extends FlutterProgramTransformer {
               .forEach((Reference reference, Constant constant) {
             if (constant is StringConstant) {
               final String value = constant.value;
-              if ((reference.node as Field?)?.name?.toString() ==
+              if ((reference.node as Field?)?.name.toString() ==
                   AopUtils.kAopAnnotationImportUri) {
                 importUri = value;
-              } else if ((reference.node as Field?)?.name?.toString() ==
+              } else if ((reference.node as Field?)?.name.toString() ==
                   AopUtils.kAopAnnotationClsName) {
                 clsName = value;
-              } else if ((reference.node as Field?)?.name?.toString() ==
+              } else if ((reference.node as Field?)?.name.toString() ==
                   AopUtils.kAopAnnotationMethodName) {
                 methodName = value;
               }
             }
             if (constant is IntConstant) {
               final int value = constant.value;
-              if ((reference.node as Field?)?.name?.toString() ==
+              if ((reference.node as Field?)?.name.toString() ==
                   AopUtils.kAopAnnotationLineNum) {
                 lineNum = value - 1;
               }

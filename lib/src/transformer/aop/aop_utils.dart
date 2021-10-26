@@ -41,6 +41,12 @@ class AopUtils {
   static Component? platformStrongComponent;
   static Set<Procedure> manipulatedProcedureSet = {};
   static Field? pointCuntTargetField;
+  static Field? pointCutStubKeyField;
+  static Class? boolClass;
+  static Procedure? stringEqualsProcedure;
+  static Field? pointCutPositionParamsListField;
+  static Field? pointCutNamedParamsMapField;
+  static Field? pointCutCuriousField;
 
   static AopMode? getAopModeByNameAndImportUri(String? name, String? importUri) {
     if (name == kAopAnnotationClassCall && importUri == kImportUriAopCall) {
@@ -153,7 +159,7 @@ class AopUtils {
         continue;
       }
       for (Field field in cls!.fields) {
-        if (field.name!.name == part) {
+        if (field.name.text == part) {
           final InterfaceType interfaceType = field.type as InterfaceType;
           cls = interfaceType.className.node as Class?;
           break;
@@ -165,7 +171,7 @@ class AopUtils {
 
   static Field? findFieldForClassWithName(Class cls, String fieldName) {
     for (Field field in cls.fields) {
-      if (field.name!.name == fieldName) {
+      if (field.name.text == fieldName) {
         return field;
       }
     }
@@ -195,7 +201,7 @@ class AopUtils {
     }
     return null;
   }
-
+  //根据需要被 hook 的代码的参数，构建最终的 PointCut 的构造方法参数
   static void concatArgumentsForAopMethod(
       Map<String, String>? sourceInfo,
       Arguments redirectArguments,
@@ -207,13 +213,13 @@ class AopUtils {
         '${AopUtils.kAopStubMethodPrefix}${AopUtils.kPrimaryKeyAopMethod}';
     //重定向到AOP的函数体中去
     final Arguments pointCutConstructorArguments = Arguments.empty();
-    final List<MapEntry> sourceInfos = <MapEntry>[];
+    final List<MapLiteralEntry> sourceInfos = <MapLiteralEntry>[];
     sourceInfo?.forEach((String key, String value) {
-      sourceInfos.add(MapEntry(StringLiteral(key), StringLiteral(value)));
+      sourceInfos.add(MapLiteralEntry(StringLiteral(key), StringLiteral(value)));
     });
     pointCutConstructorArguments.positional.add(MapLiteral(sourceInfos));
     pointCutConstructorArguments.positional.add(targetExpression);
-    String? memberName = member?.name?.name;
+    String? memberName = member?.name.text;
     if (member is Constructor) {
       memberName = AopUtils.nameForConstructor(member);
     }
@@ -222,10 +228,10 @@ class AopUtils {
         .add(StringLiteral(stubKey ?? stubKeyDefault));
     pointCutConstructorArguments.positional
         .add(ListLiteral(invocationArguments.positional));
-    final List<MapEntry> entries = <MapEntry>[];
+    final List<MapLiteralEntry> entries = <MapLiteralEntry>[];
     for (NamedExpression namedExpression in invocationArguments.named) {
       entries.add(
-          MapEntry(StringLiteral(namedExpression.name), namedExpression.value));
+          MapLiteralEntry(StringLiteral(namedExpression.name), namedExpression.value));
     }
     pointCutConstructorArguments.positional.add(MapLiteral(entries));
 
@@ -235,33 +241,63 @@ class AopUtils {
             pointCutConstructorArguments);
     redirectArguments.positional.add(pointCutConstructorInvocation);
   }
-  //构建调用原始方法的代理方法的参数
+
+  //构建调用原始方法的代理方法的参数，member 就是原始的 Procedure
   static Arguments concatArguments4PointcutStubCall(Member member) {
     final Arguments arguments = Arguments.empty();
+    //处理位置参数
     int i = 0;
     for (VariableDeclaration variableDeclaration
         in member.function!.positionalParameters) {//此处是将 PointCut 中的 positionalParams 分别转换为不同的类型
       final Arguments getArguments = Arguments.empty();
       getArguments.positional.add(IntLiteral(i));
-      final MethodInvocation methodInvocation = MethodInvocation(//示例：相当于调用 PointCut 的  this.positionalParams[i] as int
-          PropertyGet(ThisExpression(), Name('positionalParams')),
-          listGetProcedure!.name!,
-          getArguments);
-      final AsExpression asExpression = AsExpression(methodInvocation,
-          deepCopyASTNode(variableDeclaration.type, ignoreGenerics: true));
+      //调用 List 中的 i 项，并做类型转换  this.positionalParams[i] as int
+      //此处相当于 this.positionalParams
+      InstanceGet instanceGet = InstanceGet.byReference(InstanceAccessKind.Instance,
+          ThisExpression(),
+          Name("positionalParams"),
+          interfaceTargetReference: pointCutPositionParamsListField!.getterReference,
+          resultType: pointCutPositionParamsListField!.type);
+
+      //调用 list[i]
+      InstanceInvocation mockedInstanceInvocation = InstanceInvocation(
+          InstanceAccessKind.Instance,
+          instanceGet,
+          listGetProcedure!.name,//此处的 name 为  []
+          getArguments,
+          interfaceTarget: listGetProcedure!,
+          functionType: AopUtils.computeFunctionTypeForFunctionNode(listGetProcedure!.function, arguments));
+      //转换成原方法中对应位置的类型
+      AsExpression asExpression = AsExpression(mockedInstanceInvocation, deepCopyASTNode(variableDeclaration.type, ignoreGenerics: true));
       arguments.positional.add(asExpression);
       i++;
     }
+    //处理命名参数
     final List<NamedExpression> namedEntries = <NamedExpression>[];
     for (VariableDeclaration variableDeclaration
         in member.function!.namedParameters) {
       final Arguments getArguments = Arguments.empty();
       getArguments.positional.add(StringLiteral(variableDeclaration.name!));
-      final MethodInvocation methodInvocation = MethodInvocation(
-          PropertyGet(ThisExpression(), Name('namedParams')),
-          mapGetProcedure!.name!,
-          getArguments);
-      final AsExpression asExpression = AsExpression(methodInvocation,
+
+      //调用 this.positionalParams
+      InstanceGet instanceGet = InstanceGet.byReference(InstanceAccessKind.Instance,
+          ThisExpression(),
+          Name("namedParams"),
+          interfaceTargetReference: pointCutNamedParamsMapField!.getterReference,
+          resultType: pointCutNamedParamsMapField!.type);
+
+      int a = 10;
+
+      //调用 this.positionalParams["xxx"]
+      InstanceInvocation mockedInstanceInvocation = InstanceInvocation(
+          InstanceAccessKind.Instance,
+          instanceGet,
+          mapGetProcedure!.name,//此处的 name 为  []
+          getArguments,
+          interfaceTarget: mapGetProcedure!,
+          functionType: AopUtils.computeFunctionTypeForFunctionNode(mapGetProcedure!.function, arguments));
+
+      final AsExpression asExpression = AsExpression(mockedInstanceInvocation,
           deepCopyASTNode(variableDeclaration.type, ignoreGenerics: true));
       namedEntries.add(NamedExpression(variableDeclaration.name!, asExpression));//相当于 PointCut   this.namedParams["name"] as String
     }
@@ -270,23 +306,44 @@ class AopUtils {
     }
     return arguments;
   }
+
   //修改 PointCut proceed 方法中的分支
   static void insertProceedBranch(Procedure procedure, bool shouldReturn) {
-    final Block block = pointCutProceedProcedure!.function!.body as Block;
-    final String methodName = procedure.name!.name;
-    final MethodInvocation methodInvocation =
-        MethodInvocation(ThisExpression(), Name(methodName), Arguments.empty());
+    final Block block = pointCutProceedProcedure!.function.body as Block;//proceed 方法的内容
+    final String methodName = procedure.name.text; //aop_stub0
+
+    InstanceInvocation instanceInvocation = InstanceInvocation(
+        InstanceAccessKind.Instance,
+        ThisExpression(),
+        Name(methodName),
+        Arguments.empty(),
+        interfaceTarget: procedure,
+        functionType: AopUtils.computeFunctionTypeForFunctionNode(procedure.function, Arguments.empty()));
+
     final List<Statement> statements = block.statements;
-    statements.insert(
-        statements.length - 1,
-        IfStatement(
-            MethodInvocation(PropertyGet(ThisExpression(), Name('stubKey')),
-                Name('=='), Arguments(<Expression>[StringLiteral(methodName)])),
-            Block(<Statement>[
-              if (shouldReturn) ReturnStatement(methodInvocation),
-              if (!shouldReturn) ExpressionStatement(methodInvocation),
-            ]),
-            null));
+
+    EqualsCall equalsCall = EqualsCall(
+        InstanceGet.byReference( //left
+            InstanceAccessKind.Instance, //this.stubkey
+            ThisExpression(),
+            Name("stubKey"),
+            interfaceTargetReference: pointCutStubKeyField!.getterReference,
+            resultType: pointCutStubKeyField!.type),
+        StringLiteral(methodName),//right
+        functionType: FunctionType([],
+            InterfaceType(boolClass!, Nullability.nonNullable),
+            Nullability.nonNullable),
+        interfaceTarget: stringEqualsProcedure!);
+
+    IfStatement ifStatement = IfStatement(
+        equalsCall,
+        Block(<Statement>[
+          if (shouldReturn) ReturnStatement(instanceInvocation),
+          if (!shouldReturn) ExpressionStatement(instanceInvocation),
+        ]),
+        null);
+
+    statements.insert(statements.length - 1, ifStatement);
   }
 
   static bool canOperateLibrary(Library library) {
@@ -387,17 +444,17 @@ class AopUtils {
       Procedure referProcedure, Statement? bodyStatements, bool shouldReturn) {//referProcdure 为 _MyHomePageState._incrementCounter。bodyStatements 为原方法的方法体内容
     final FunctionNode functionNode = FunctionNode(bodyStatements,//构建代理方法
         typeParameters: deepCopyASTNodes<TypeParameter>(
-            referProcedure.function!.typeParameters),
-        positionalParameters: referProcedure.function!.positionalParameters,
-        namedParameters: referProcedure.function!.namedParameters,
-        requiredParameterCount: referProcedure.function!.requiredParameterCount,
+            referProcedure.function.typeParameters),
+        positionalParameters: referProcedure.function.positionalParameters,
+        namedParameters: referProcedure.function.namedParameters,
+        requiredParameterCount: referProcedure.function.requiredParameterCount,
         returnType: shouldReturn //根据原方法的情况构建返回值
-            ? deepCopyASTNode(referProcedure.function!.returnType)
+            ? deepCopyASTNode(referProcedure.function.returnType)
             : const VoidType(),
-        asyncMarker: referProcedure.function!.asyncMarker,
-        dartAsyncMarker: referProcedure.function!.dartAsyncMarker);
-    final Procedure procedure = Procedure(//构建代理方法
-      Name(methodName.name, methodName.library),
+        asyncMarker: referProcedure.function.asyncMarker,
+        dartAsyncMarker: referProcedure.function.dartAsyncMarker);
+    final Procedure procedure = Procedure(
+      Name(methodName.text, methodName.library),
       ProcedureKind.Method,
       functionNode,
       isStatic: referProcedure.isStatic,
@@ -421,18 +478,18 @@ class AopUtils {
       bool shouldReturn) {
     final FunctionNode functionNode = FunctionNode(bodyStatements,
         typeParameters: deepCopyASTNodes<TypeParameter>(
-            referConstructor.function!.typeParameters),
-        positionalParameters: referConstructor.function!.positionalParameters,
-        namedParameters: referConstructor.function!.namedParameters,
+            referConstructor.function.typeParameters),
+        positionalParameters: referConstructor.function.positionalParameters,
+        namedParameters: referConstructor.function.namedParameters,
         requiredParameterCount:
-            referConstructor.function!.requiredParameterCount,
+            referConstructor.function.requiredParameterCount,
         returnType: shouldReturn
-            ? deepCopyASTNode(referConstructor.function!.returnType)
+            ? deepCopyASTNode(referConstructor.function.returnType)
             : const VoidType(),
-        asyncMarker: referConstructor.function!.asyncMarker,
-        dartAsyncMarker: referConstructor.function!.dartAsyncMarker);
+        asyncMarker: referConstructor.function.asyncMarker,
+        dartAsyncMarker: referConstructor.function.dartAsyncMarker);
     final Constructor constructor = Constructor(functionNode,
-        name: Name(methodName.name, methodName.library),
+        name: Name(methodName.text, methodName.library),
         isConst: referConstructor.isConst,
         isExternal: referConstructor.isExternal,
         isSynthetic: referConstructor.isSynthetic,
@@ -548,36 +605,36 @@ class AopUtils {
 
   static Arguments concatArguments4PointcutStubCall2(Member member) {
     final Arguments arguments = Arguments.empty();
-    int i = 0;
-    for (VariableDeclaration variableDeclaration
-    in member.function!.positionalParameters) {//此处是将 PointCut 中的 positionalParams 分别转换为不同的类型
-      final Arguments getArguments = Arguments.empty();
-      getArguments.positional.add(IntLiteral(i));
-      final MethodInvocation methodInvocation = MethodInvocation(//示例：相当于调用 PointCut 的  this.positionalParams[i] as int
-          PropertyGet(ThisExpression(), Name('positionalParams')),
-          listGetProcedure!.name!,
-          getArguments);
-      final AsExpression asExpression = AsExpression(methodInvocation,
-          deepCopyASTNode2(variableDeclaration.type, ignoreGenerics: true));
-      arguments.positional.add(asExpression);
-      i++;
-    }
-    final List<NamedExpression> namedEntries = <NamedExpression>[];
-    for (VariableDeclaration variableDeclaration
-    in member.function!.namedParameters) {
-      final Arguments getArguments = Arguments.empty();
-      getArguments.positional.add(StringLiteral(variableDeclaration.name!));
-      final MethodInvocation methodInvocation = MethodInvocation(
-          PropertyGet(ThisExpression(), Name('namedParams')),
-          mapGetProcedure!.name!,
-          getArguments);
-      final AsExpression asExpression = AsExpression(methodInvocation,
-          deepCopyASTNode2(variableDeclaration.type, ignoreGenerics: true));
-      namedEntries.add(NamedExpression(variableDeclaration.name!, asExpression));//相当于 PointCut   this.namedParams["name"] as String
-    }
-    if (namedEntries.isNotEmpty) {
-      arguments.named.addAll(namedEntries);
-    }
+    // int i = 0;
+    // for (VariableDeclaration variableDeclaration
+    // in member.function!.positionalParameters) {//此处是将 PointCut 中的 positionalParams 分别转换为不同的类型
+    //   final Arguments getArguments = Arguments.empty();
+    //   getArguments.positional.add(IntLiteral(i));
+    //   final MethodInvocation methodInvocation = MethodInvocation(//示例：相当于调用 PointCut 的  this.positionalParams[i] as int
+    //       PropertyGet(ThisExpression(), Name('positionalParams')),
+    //       listGetProcedure!.name!,
+    //       getArguments);
+    //   final AsExpression asExpression = AsExpression(methodInvocation,
+    //       deepCopyASTNode2(variableDeclaration.type, ignoreGenerics: true));
+    //   arguments.positional.add(asExpression);
+    //   i++;
+    // }
+    // final List<NamedExpression> namedEntries = <NamedExpression>[];
+    // for (VariableDeclaration variableDeclaration
+    // in member.function!.namedParameters) {
+    //   final Arguments getArguments = Arguments.empty();
+    //   getArguments.positional.add(StringLiteral(variableDeclaration.name!));
+    //   final MethodInvocation methodInvocation = MethodInvocation(
+    //       PropertyGet(ThisExpression(), Name('namedParams')),
+    //       mapGetProcedure!.name!,
+    //       getArguments);
+    //   final AsExpression asExpression = AsExpression(methodInvocation,
+    //       deepCopyASTNode2(variableDeclaration.type, ignoreGenerics: true));
+    //   namedEntries.add(NamedExpression(variableDeclaration.name!, asExpression));//相当于 PointCut   this.namedParams["name"] as String
+    // }
+    // if (namedEntries.isNotEmpty) {
+    //   arguments.named.addAll(namedEntries);
+    // }
     return arguments;
   }
 
@@ -599,7 +656,7 @@ class AopUtils {
     FunctionType functionType = new FunctionType(
         positionDartType,
         deepCopyASTNode(functionNode.returnType, isReturnType: true,ignoreGenerics: true),
-        Nullability.legacy,
+        Nullability.nonNullable,
         namedParameters: namedDartType,
         typeParameters: [],
         requiredParameterCount: functionNode.requiredParameterCount
@@ -638,8 +695,8 @@ class AopUtils {
   static String nameForConstructor(Constructor constructor) {
     final Class constructorCls = constructor.parent as Class;
     String constructorName = '${constructorCls.name}';
-    if (constructor.name!.name.isNotEmpty) {
-      constructorName += '.${constructor.name!.name}';
+    if (constructor.name.text.isNotEmpty) {
+      constructorName += '.${constructor.name.text}';
     }
     return constructorName;
   }
