@@ -168,6 +168,7 @@ class _WidgetCallSiteTransformer extends Transformer {
       new NamedExpression('line', new IntLiteral(location.line)),
       new NamedExpression('column', new IntLiteral(location.column)),
       new NamedExpression('rootUrl', new StringLiteral(_rootUrl)),
+      new NamedExpression('importUri', new StringLiteral(_currentLibrary!.importUri.toString()))
     ];
     if (showFile) {
       arguments.add(new NamedExpression(
