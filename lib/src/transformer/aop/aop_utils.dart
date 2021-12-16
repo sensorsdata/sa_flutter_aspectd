@@ -518,8 +518,11 @@ class AopUtils {
         flags: node.flags,
         isFinal: node.isFinal,
         isConst: node.isConst,
-        isFieldFormal: node.isFieldFormal,
-        isCovariant: node.isCovariant,
+        isInitializingFormal: node.isInitializingFormal,
+        isCovariantByDeclaration: node.isCovariantByDeclaration,
+        isLate: node.isLate,
+        isRequired: node.isRequired,
+        isLowered: node.isLowered,
       );
     }
     if (node is TypeParameterType) {
@@ -561,8 +564,11 @@ class AopUtils {
         flags: node.flags,
         isFinal: node.isFinal,
         isConst: node.isConst,
-        isFieldFormal: node.isFieldFormal,
-        isCovariant: node.isCovariant,
+        isInitializingFormal: node.isInitializingFormal,
+        isCovariantByDeclaration: node.isCovariantByDeclaration,
+        isLate: node.isLate,
+        isRequired: node.isRequired,
+        isLowered: node.isLowered,
       );
     }
     if (node is TypeParameterType) {
